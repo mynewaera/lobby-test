@@ -14,32 +14,27 @@ exports.handler = async function(event) {
     return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
   }
 
-  const { url } = JSON.parse(event.body || "{}");
+  let body;
+  try { body = JSON.parse(event.body || "{}"); } 
+  catch(e) { return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid JSON" }) }; }
+
+  const { url } = body;
   if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing URL" }) };
 
-  const prompt = `You are a brutally honest brand and website expert. Visit and thoroughly analyse this website: ${url}.
+  const prompt = `You are a brutally honest brand and website expert. Use your knowledge to analyse this website: ${url}
 
-IMPORTANT: You must visit the actual URL, read the real homepage content, and give scores based on what you ACTUALLY see. Every score must reflect the specific site. Do NOT give generic feedback. Reference specific text, design choices, or missing elements you actually observed.
+Score these 5 categories out of 20 each. Be specific — reference what you know about this site or its industry:
 
-Score these 5 categories out of 20 each:
+1. POSITIONING (0-20): Crystal clear in 5 seconds what they do, who for, what makes them different? Deduct for vague language.
+2. FIRST IMPRESSION (0-20): Does the visual design signal credibility immediately? Current or dated?
+3. TRUST SIGNALS (0-20): Client names, logos, testimonials, results visible? No social proof = under 8.
+4. CONVERSION (0-20): Single clear CTA? Easy to take next step? Deduct for confusion or buried contact info.
+5. MESSAGING (0-20): Written for the reader or about the business? Outcomes or filler words like "passionate"?
 
-1. POSITIONING (0-20): Is it crystal clear in 5 seconds what this business does, who for, and what makes it different? Deduct for vague language or generic claims.
-2. FIRST IMPRESSION (0-20): Does the visual design immediately signal credibility? Is it current or dated? Does the hero stop you?
-3. TRUST SIGNALS (0-20): Client names, logos, testimonials, case studies, results? A site with no social proof scores under 8.
-4. CONVERSION (0-20): Single clear CTA? Is it compelling and easy to act on? Deduct for competing CTAs or buried contact info.
-5. MESSAGING (0-20): Written for the reader or about the business? Specific outcomes or filler phrases like "passionate" and "dedicated"?
+Return ONLY this exact JSON structure, no markdown, no explanation:
+{"overall_score":0,"verdict":"4-6 word phrase","summary":"2 sentences of honest assessment","categories":[{"name":"Positioning","score":0,"finding":"2 sentences specific to this site","level":"red"},{"name":"First impression","score":0,"finding":"2 sentences specific to this site","level":"amber"},{"name":"Trust signals","score":0,"finding":"2 sentences specific to this site","level":"amber"},{"name":"Conversion","score":0,"finding":"2 sentences specific to this site","level":"amber"},{"name":"Messaging","score":0,"finding":"2 sentences specific to this site","level":"green"}]}
 
-For each category write ONE finding of 2 sentences referencing something SPECIFIC from the actual site.
-
-Also provide:
-- overall_score: sum of all 5 scores
-- verdict: 4-6 word phrase (e.g. "Strong visuals, weak differentiation")
-- summary: 2 specific sentences about what you actually saw
-
-Level: green if score>=15, amber if 9-14, red if <=8
-
-Return ONLY valid JSON, no markdown:
-{"overall_score":0,"verdict":"...","summary":"...","categories":[{"name":"Positioning","score":0,"finding":"...","level":"red"}]}`;
+Level rules: green if score>=15, amber if 9-14, red if <=8`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -50,14 +45,18 @@ Return ONLY valid JSON, no markdown:
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 900,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
         messages: [{ role: "user", content: prompt }]
       })
     });
 
     const data = await response.json();
+
+    if (!data.content || !data.content.length) {
+      throw new Error("Empty response from API");
+    }
+
     const text = data.content
       .filter(b => b.type === "text")
       .map(b => b.text)
@@ -68,9 +67,13 @@ Return ONLY valid JSON, no markdown:
     if (i >= 0 && j > i) {
       return { statusCode: 200, headers, body: text.slice(i, j + 1) };
     }
-    throw new Error("No JSON in response");
+    throw new Error("No JSON found in response");
 
   } catch (err) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+    return { 
+      statusCode: 500, 
+      headers, 
+      body: JSON.stringify({ error: err.message }) 
+    };
   }
 };
